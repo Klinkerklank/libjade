@@ -1,0 +1,15 @@
+*.s
+*.safety
+*.safety_*
+*.sct
+*.sct_*
+*.o
+*.a
+_build/
+libjade.a
+libjade.h
+.deps
+.ec
+.log
+.error
+.jflags
