@@ -1,9 +1,47 @@
-inline fn __sha256_ref_alt(reg u64 out in inlen)
-{
 
+// initialise the intermediate hash values (IHVs)
+inline fn __init_ihv() -> stack u32[8] {
+  stack u32[8] ihv;
+
+  // initial values of the IHVs according to the Secure Hash Standard (SHS)
+  ihv[0] = 0x6a09e667;
+  ihv[1] = 0xbb67ae85;
+  ihv[2] = 0x3c6ef372;
+  ihv[3] = 0xa54ff53a;
+  ihv[4] = 0x510e527f;
+  ihv[5] = 0x9b05688c;
+  ihv[6] = 0x1f83d9ab;
+  ihv[7] = 0x5be0cd19;
+
+  return ihv;
 }
 
+// take the IHVs from the stack, swap their byte order, and overwrite the output
+inline fn __set_out(stack u32[8] ihv, reg u64 addr) {
+  inline int i;
+  reg u32 swap;
 
+  for i=0 to 8 {
+    swap = ihv[i]; // copy one 32-bit word of the IHVs from the stack into a reg
+    swap = #BSWAP_32(swap); // swap the byte order (#BSWAP_32 requires a reg argument)
+    (u32)[addr + i*4] = swap;
+  }
+}
+
+inline fn __sha256_ref_alt(reg u64 out in inlen) {
+  // store the parameters on the stack
+  stack u64 out_addr in_addr inlen_addr;
+  out_addr = out;
+  in_addr  = in;
+  inlen    = inlen_addr;
+
+  // initialise the intermediate hash values on the stack
+  stack u32[8] ihv;
+  ihv = __init_ihv();
+
+  // set the output to the IHVs
+  __set_out(ihv, out_addr);
+}
 
 
 
