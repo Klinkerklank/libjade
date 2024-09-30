@@ -1,9 +1,8 @@
 
 // initialise the intermediate hash values (IHVs)
 inline fn __init_ihv() -> stack u32[8] {
-  stack u32[8] ihv;
-
   // initial values of the IHVs according to the Secure Hash Standard (SHS)
+  stack u32[8] ihv;
   ihv[0] = 0x6a09e667;
   ihv[1] = 0xbb67ae85;
   ihv[2] = 0x3c6ef372;
@@ -12,35 +11,162 @@ inline fn __init_ihv() -> stack u32[8] {
   ihv[5] = 0x9b05688c;
   ihv[6] = 0x1f83d9ab;
   ihv[7] = 0x5be0cd19;
-
+  
   return ihv;
 }
 
-// take the IHVs from the stack, swap their byte order, and overwrite the output
-inline fn __set_out(stack u32[8] ihv, reg u64 addr) {
-  inline int i;
+// sigma_0 fuction for confuscating words for the message schedule
+inline fn __sigma_0(reg u32 w) -> reg u32 {
+  // compute the two right rotations and the right shift
+  reg u32 w1 w2 w3;
+  w3 = w;
+  _, _, w1 = #ROR_32(w, 7);  // w rot 7
+  _, _, w2 = #ROR_32(w, 18); // w rot 18
+  w3 >>= 3;                  // w >>  3
+  
+  w1 ^= w2;                  // (w rot 7) ^ (w rot 18)
+  w1 ^= w3;                  // (w rot 7) ^ (w rot 18) ^ (w >> 3)
+
+  return w1;                 // (w rot 7) ^ (w rot 18) ^ (w >> 3)
+}
+
+// sigma_1 fuction for confuscating words for the message schedule
+inline fn __sigma_1(reg u32 w) -> reg u32 {
+  // compute the two right rotations and the right shift
+  reg u32 w1 w2 w3;
+  w3 = w;
+  _, _, w1 = #ROR_32(w, 17); // w rot 17
+  _, _, w2 = #ROR_32(w, 19); // w rot 19
+  w3 >>= 10;                 // w >>  10
+  
+  w1 ^= w2;                  // (w rot 17) ^ (w rot 19)
+  w1 ^= w3;                  // (w rot 17) ^ (w rot 19) ^ (w >> 10)
+
+  return w1;                 // (w rot 17) ^ (w rot 19) ^ (w >> 10)
+}
+
+// Sigma_0 fuction for confuscating words in the main loop
+inline fn __Sigma_0(reg u32 w) -> reg u32 {
+  // compute the three right rotations
+  reg u32 w1 w2 w3;
+  _, _, w1 = #ROR_32(w, 2);  // w rot 2
+  _, _, w2 = #ROR_32(w, 13); // w rot 13
+  _, _, w3 = #ROR_32(w, 22); // w rot 22
+  
+  w1 ^= w2;                  // (w rot 2) ^ (w rot 13)
+  w1 ^= w3;                  // (w rot 2) ^ (w rot 13) ^ (w rot 22)
+
+  return w1;                 // (w rot 2) ^ (w rot 13) ^ (w rot 22)
+}
+
+// Sigma_1 fuction for confuscating words in the main loop
+inline fn __Sigma_1(reg u32 w) -> reg u32 {
+  // compute the three right rotations
+  reg u32 w1 w2 w3;
+  _, _, w1 = #ROR_32(w, 6);  // w rot 6
+  _, _, w2 = #ROR_32(w, 11); // w rot 11
+  _, _, w3 = #ROR_32(w, 25); // w rot 25
+  
+  w1 ^= w2;                  // (w rot 6) ^ (w rot 11)
+  w1 ^= w3;                  // (w rot 6) ^ (w rot 11) ^ (w rot 25)
+
+  return w1;                 // (w rot 6) ^ (w rot 11) ^ (w rot 25)
+}
+
+// compute the next word for the message schedule
+inline fn __f_word(reg u32 w_i2 w_i7 w_i15 w_i16) -> reg u32 {
+  reg u32 w_i temp;
+  temp = __sigma_1(w_i15);
+  w_i  = __sigma_0(w_i2);
+  w_i += w_i7;
+  w_i += temp;
+  w_i += w_i16;
+  return w_i;
+}
+
+inline fn __f_pad(reg u64 mess bytes) -> stack u32[32], stack u8 {
+  stack u32[32] last_blocks; // will hold the actual last block(s) with padding
+  stack u8 num_last_blocks;  // number indicating whether one or two blocks are at the end
+  num_last_blocks = 1;
+
+  // compute the quotient and remainder of bytes / block size, where block size = 64 bytes
+  reg u64 quot rest;
+  quot   = bytes;
+  quot >>= 6;     // rightshift 6 = quotient of divide by 2^6=64
+  rest   = bytes;
+  rest  &= 0x7F;  // AND with bitmask 0x7F=0b111111 = remainder of divide by 2^6=64
+
+  // need 8 bytes to encode the length and 1 byte to encode the separator bit
+  // if the remainder of the message exceeds 64 - 8 - 1 = 55 bytes, need an extra block for padding
+  if rest > 55 {
+    num_last_blocks = 2; // need an extra block
+  }
+
+  // copy the bytes of the last block of the message
+  reg u64 mess_i; // byte index of the last block of the message
+  mess_i  = quot; // set to the number of blocks
+  mess_i -= 1;    // set to the second-to-last block
+  mess_i *= 64;   // multiply by bytes per block
+  inline u64 i;
+  i = 0;
+  while (i<rest) {
+    last_blocks[u8 (int) i] = (u8)[mess + mess_i + i];
+    i += 1;
+  }
+
+  // add the single padding bit
+  last_blocks[u8 (int) i] = 0x80; // 0x80 = 0b10000000
+  i += 1;
+
+
+  // fill with zero-padding
+  reg u64 target;
+  if (num_last_blocks == 1) {
+    target = 56;
+  } else {
+    target = 120;
+  }
+
+  while (i<target) {
+    last_blocks[u8 (int) i] = 0x0;
+    i += 1;
+  }
+
+  // append the message length
+  last_blocks[i] = bytes;
+
+  return last_blocks, num_last_blocks;
+}
+
+// take the IHVs from the stack, swap their byte order, and overwrite the hash value
+inline fn __set_hash(stack u32[8] ihv, reg u64 hash) {
   reg u32 swap;
 
+  inline int i;
   for i=0 to 8 {
-    swap = ihv[i]; // copy one 32-bit word of the IHVs from the stack into a reg
-    swap = #BSWAP_32(swap); // swap the byte order (#BSWAP_32 requires a reg argument)
-    (u32)[addr + i*4] = swap;
+    swap = ihv[i];            // copy one 32-bit word of the IHVs from the stack into a reg
+    swap = #BSWAP_32(swap);   // swap the byte order (#BSWAP_32 requires a reg argument)
+    (u32)[hash + i*4] = swap; // write the swapped word to the hash value
   }
 }
 
-inline fn __sha256_ref_alt(reg u64 out in inlen) {
-  // store the parameters on the stack
-  stack u64 out_addr in_addr inlen_addr;
-  out_addr = out;
-  in_addr  = in;
-  inlen    = inlen_addr;
+// take a byte sequence mess_in with length bytes_in, and compute and store its hash value at hash_in
+inline fn __sha256_ref_alt(reg u64 hash_in mess_in bytes_in) {
+  // store the parameter addresses on the stack
+  stack u64 hash;
+  hash  = hash_in;
 
-  // initialise the intermediate hash values on the stack
+  // compute the message padding
+  stack u32[32] last_blocks; // space for two blocks of 512 bits, split in 32-bit words
+  stack u8 num_last_blocks;  // number indicating whether one or two blocks are at the end
+  last_blocks, num_last_blocks = __f_pad(mess_in, bytes_in);
+
+  // initialise the IHVs on the stack
   stack u32[8] ihv;
   ihv = __init_ihv();
 
-  // set the output to the IHVs
-  __set_out(ihv, out_addr);
+  // set the hash value to the IHVs
+  __set_hash(ihv, hash);
 }
 
 

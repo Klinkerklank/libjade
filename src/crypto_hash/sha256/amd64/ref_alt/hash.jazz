@@ -6,6 +6,8 @@ export fn jade_hash_sha256_amd64_ref_alt(reg u64 hash input input_length) -> reg
 
   _ = #init_msf();
 
+  // input is an array of 32-bit words
+  // input_length is the number of bytes
   __sha256_ref_alt(hash, input, input_length);
   ?{}, r = #set0();
   return r;
