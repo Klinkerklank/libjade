@@ -196,20 +196,20 @@ inline fn f_rou(reg u32[8] t, reg u32 w_i k_i) -> reg u32[8] {
   reg u32 t_1 t_2 fun;
 
   // compute t_1
-  t_1  = t[7];                  // t_1 = t_h
-  t_1 += w_i;                   // t_1 = t_h + w_i
-  t_1 += k_i;                   // t_1 = t_h + w_i + k_i
+  t_1  = t[7];                     // t_1 = t_h
+  t_1 += w_i;                      // t_1 = t_h + w_i
+  t_1 += k_i;                      // t_1 = t_h + w_i + k_i
   fun = __f_cho(t[4], t[5], t[6]); // fun = f_cho(t_e, t_f, t_g)
-  t_1 += fun;                   // t_1 = t_h + w_i + k_i + f_cho(t_e, t_f, t_g)
-  fun = __Sigma_1(t[4]);         // fun = Sigma_1(t_e)
-  t_1 += fun;                   // t_1 = t_h + w_i + k_i + f_cho(t_e, t_f, t_g) + Sigma_1(t_e)
+  t_1 += fun;                      // t_1 = t_h + w_i + k_i + f_cho(t_e, t_f, t_g)
+  fun = __Sigma_1(t[4]);           // fun = Sigma_1(t_e)
+  t_1 += fun;                      // t_1 = t_h + w_i + k_i + f_cho(t_e, t_f, t_g) + Sigma_1(t_e)
 
   // compute t_2
-  t_2  = t_1;                   // t_2 = t_1
+  t_2  = t_1;                      // t_2 = t_1
   fun = __f_maj(t[0], t[1], t[2]); // fun = f_maj(t_a, t_b, t_c)
-  t_2 += fun;                   // t_2 = t_1 + f_maj(t_a, t_b, t_c)
-  fun = __Sigma_0(t[0]);         // fun = Sigma_0(t_a)
-  t_2 += fun;                   // t_2 = t_1 + f_maj(t_a, t_b, t_c) + Sigma_0(t_a)
+  t_2 += fun;                      // t_2 = t_1 + f_maj(t_a, t_b, t_c)
+  fun = __Sigma_0(t[0]);           // fun = Sigma_0(t_a)
+  t_2 += fun;                      // t_2 = t_1 + f_maj(t_a, t_b, t_c) + Sigma_0(t_a)
 
   // update the working variables
   t[7] = t[6];              // t_h = t_g
@@ -224,8 +224,33 @@ inline fn f_rou(reg u32[8] t, reg u32 w_i k_i) -> reg u32[8] {
   return t;
 }
 
-inline fn __f_loop() -> {
+// main loop that takes and updates the IHVs through iterated calls of the round function
+inline fn __f_loop(stack u32[8] ihv, stack u32[64] w, stack u32[64] k) -> stack u32[8] {
+  reg u32[8] t; // working variables
+  t = ihv;      // copy the IHVs
 
+  // run the round function 64 times on the working variables
+  inline int i;
+  for i=0 to 64 {
+    t = f_rou(t, w[i], k[i]);
+  }
+
+  ihv = t;    // update the IHVs to the values of the working variables
+  return ihv; // return the updated IHVs
+}
+
+// process the message blocks that consist entirely of message bytes
+inline fn __f_comp_first(stack u32[8] ihv, stack u64 mess num_first_blocks) -> stack u32[8] {
+
+
+  return ihv;
+}
+
+// process the message blocks that comprise the blocks with padding
+inline fn __f_comp_last(stack u32[8] ihv, stack u32[32] last_blocks, stack u8 num_last_blocks) -> stack u32[8] {
+  
+
+  return ihv;
 }
 
 // take the IHVs from the stack, swap their byte order, and overwrite the hash value
@@ -257,10 +282,10 @@ inline fn __sha256_ref_alt(reg u64 hash_in mess_in bytes_in) {
   ihv = __init_ihv();
 
   // run the compression function iteratively on message blocks consisting fully of message bytes
-  // __f_comp_first(ihv, mess_in, num_first_blocks)
+  // ihv = __f_comp_first(ihv, mess_in, num_first_blocks);
 
   // run the compression function on the last (two) message block(s) containing padding
-  // __f_comp_last(ihv, last_blocks, num_last_blocks)
+  // ihv = __f_comp_last(ihv, last_blocks, num_last_blocks);
 
   // set the hash value to the IHVs
   __set_hash(ihv, hash);
