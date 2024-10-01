@@ -129,14 +129,14 @@ inline fn __Sigma_1(reg u32 w) -> reg u32 {
 // compute the next word for the message schedule
 inline fn __f_word(reg u32 w_i2 w_i7 w_i15 w_i16) -> reg u32 {
   reg u32 w_i temp;
+  temp = __sigma_0(w_i15);
+  
+  w_i  = __sigma_1(w_i2);  // sigma_1(w_{i-2})
+  w_i += w_i7;             // sigma_1(w_{i-2}) + w_{i-7}
+  w_i += temp;             // sigma_1(w_{i-2}) + w_{i-7} + sigma_0(w_{i-15})
+  w_i += w_i16;            // sigma_1(w_{i-2}) + w_{i-7} + sigma_0(w_{i-15}) + w_{i-16}
 
-  temp = __sigma_1(w_i15);
-  w_i  = __sigma_0(w_i2);
-  w_i += w_i7;
-  w_i += temp;
-  w_i += w_i16;
-
-  return w_i;
+  return w_i;              // sigma_1(w_{i-2}) + w_{i-7} + sigma_0(w_{i-15}) + w_{i-16}
 }
 
 // take a message block and produce a message schedule from it
