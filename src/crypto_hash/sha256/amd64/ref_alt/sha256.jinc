@@ -191,6 +191,40 @@ inline fn __f_cho(reg u32 x y z) -> reg u32 {
   return cho;
 }
 
+// round function that takes the working variables and updates them
+inline fn f_rou(reg u32 t_a t_b t_c t_d t_e t_f t_g t_h w_i k_i)
+-> reg u32, reg u32, reg u32, reg u32, reg u32, reg u32, reg u32, reg u32 {
+  reg u32 t_1 t_2 fun;
+
+  // compute t_1
+  t_1  = t_h;                   // t_1 = t_h
+  t_1 += w_i;                   // t_1 = t_h + w_i
+  t_1 += k_i;                   // t_1 = t_h + w_i + k_i
+  fun = __f_cho(t_e, t_f, t_g); // fun = f_cho(t_e, t_f, t_g)
+  t_1 += fun;                   // t_1 = t_h + w_i + k_i + f_cho(t_e, t_f, t_g)
+  fun = __Sigma_1(t_e);         // fun = Sigma_1(t_e)
+  t_1 += fun;                   // t_1 = t_h + w_i + k_i + f_cho(t_e, t_f, t_g) + Sigma_1(t_e)
+
+  // compute t_2
+  t_2  = t_1;                   // t_2 = t_1
+  fun = __f_maj(t_a, t_b, t_c); // fun = f_maj(t_a, t_b, t_c)
+  t_2 += fun;                   // t_2 = t_1 + f_maj(t_a, t_b, t_c)
+  fun = __Sigma_0(t_a);         // fun = Sigma_0(t_a)
+  t_2 += fun;                   // t_2 = t_1 + f_maj(t_a, t_b, t_c) + Sigma_0(t_a)
+
+  // update the working variables
+  t_h  = t_g;
+  t_g  = t_f;
+  t_f  = t_e;
+  t_e  = t_d; t_e += t_1;
+  t_d  = t_c;
+  t_c  = t_b;
+  t_b  = t_a;
+  t_a  = t_1; t_a += t_2;
+
+  return t_a, t_b, t_c, t_d, t_e, t_f, t_g, t_h;
+}
+
 // take the IHVs from the stack, swap their byte order, and overwrite the hash value
 inline fn __set_hash(stack u32[8] ihv, reg u64 hash) {
   reg u32 swap;
