@@ -192,37 +192,40 @@ inline fn __f_cho(reg u32 x y z) -> reg u32 {
 }
 
 // round function that takes the working variables and updates them
-inline fn f_rou(reg u32 t_a t_b t_c t_d t_e t_f t_g t_h w_i k_i)
--> reg u32, reg u32, reg u32, reg u32, reg u32, reg u32, reg u32, reg u32 {
+inline fn f_rou(reg u32[8] t, reg u32 w_i k_i) -> reg u32[8] {
   reg u32 t_1 t_2 fun;
 
   // compute t_1
-  t_1  = t_h;                   // t_1 = t_h
+  t_1  = t[7];                  // t_1 = t_h
   t_1 += w_i;                   // t_1 = t_h + w_i
   t_1 += k_i;                   // t_1 = t_h + w_i + k_i
-  fun = __f_cho(t_e, t_f, t_g); // fun = f_cho(t_e, t_f, t_g)
+  fun = __f_cho(t[4], t[5], t[6]); // fun = f_cho(t_e, t_f, t_g)
   t_1 += fun;                   // t_1 = t_h + w_i + k_i + f_cho(t_e, t_f, t_g)
-  fun = __Sigma_1(t_e);         // fun = Sigma_1(t_e)
+  fun = __Sigma_1(t[4]);         // fun = Sigma_1(t_e)
   t_1 += fun;                   // t_1 = t_h + w_i + k_i + f_cho(t_e, t_f, t_g) + Sigma_1(t_e)
 
   // compute t_2
   t_2  = t_1;                   // t_2 = t_1
-  fun = __f_maj(t_a, t_b, t_c); // fun = f_maj(t_a, t_b, t_c)
+  fun = __f_maj(t[0], t[1], t[2]); // fun = f_maj(t_a, t_b, t_c)
   t_2 += fun;                   // t_2 = t_1 + f_maj(t_a, t_b, t_c)
-  fun = __Sigma_0(t_a);         // fun = Sigma_0(t_a)
+  fun = __Sigma_0(t[0]);         // fun = Sigma_0(t_a)
   t_2 += fun;                   // t_2 = t_1 + f_maj(t_a, t_b, t_c) + Sigma_0(t_a)
 
   // update the working variables
-  t_h  = t_g;
-  t_g  = t_f;
-  t_f  = t_e;
-  t_e  = t_d; t_e += t_1;
-  t_d  = t_c;
-  t_c  = t_b;
-  t_b  = t_a;
-  t_a  = t_1; t_a += t_2;
+  t[7] = t[6];              // t_h = t_g
+  t[6] = t[5];              // t_g = t_f
+  t[5] = t[4];              // t_f = t_e
+  t[4] = t[3]; t[4] += t_1; // t_e = t_d + t_1
+  t[3] = t[2];              // t_d = t_c
+  t[2] = t[1];              // t_c = t_b
+  t[1] = t[0];              // t_b = t_a
+  t[0] = t_1;  t[0] += t_2; // t_a = t_1 + t_2
 
-  return t_a, t_b, t_c, t_d, t_e, t_f, t_g, t_h;
+  return t;
+}
+
+inline fn __f_loop() -> {
+
 }
 
 // take the IHVs from the stack, swap their byte order, and overwrite the hash value
