@@ -1,4 +1,6 @@
 
+require "sha256_constants.jinc"
+
 // initialise the intermediate hash values (IHVs)
 inline fn __init_ihv() -> stack u32[8] {
   // initial values of the IHVs according to the Secure Hash Standard (SHS)
@@ -116,8 +118,8 @@ inline fn __f_word(reg u32 w_i2 w_i7 w_i15 w_i16) -> reg u32 {
 }
 
 // take a message block and produce a message schedule from it
-inline fn __f_sch(stack u32[16] block) -> reg u32[64] {
-  reg u32[64] sch; // message schedule
+inline fn __f_sch(stack u32[16] block) -> stack u32[64] {
+  stack u32[64] sch; // message schedule
 
   // copy the message block into the first 16 words
   inline int i;
@@ -227,7 +229,12 @@ inline fn f_rou(reg u32[8] t, reg u32 w_i k_i) -> reg u32[8] {
 // main loop that takes and updates the IHVs through iterated calls of the round function
 inline fn __f_loop(stack u32[8] ihv, stack u32[64] w, stack u32[64] k) -> stack u32[8] {
   reg u32[8] t; // working variables
-  t = ihv;      // copy the IHVs
+
+  // copy the IHVs into the working variables
+  inline int j;
+  for j=0 to 8 {
+    t[j] = ihv[j];      
+  }
 
   // run the round function 64 times on the working variables
   inline int i;
@@ -241,14 +248,44 @@ inline fn __f_loop(stack u32[8] ihv, stack u32[64] w, stack u32[64] k) -> stack 
 
 // process the message blocks that consist entirely of message bytes
 inline fn __f_comp_first(stack u32[8] ihv, stack u64 mess num_first_blocks) -> stack u32[8] {
+  stack u32[16] block; // message block
+  stack u32[64] sch;   // message schedule
+  
+  inline int i;
+  inline int j;
+  while (i<num_first_blocks) {
+    // copy the next block of the message word by word
+    for j=0 to 16 {
+      block[j] = (u32)[mess + i*16 + j];
+    }
 
+    sch = __f_sch(block);               // compute the message schedule
+    ihv = __f_loop(ihv, sch, SHA256_k); // run the main loop and update the IHVs
+
+    i += 1;
+  }
 
   return ihv;
 }
 
 // process the message blocks that comprise the blocks with padding
 inline fn __f_comp_last(stack u32[8] ihv, stack u32[32] last_blocks, stack u8 num_last_blocks) -> stack u32[8] {
+  stack u32[16] block; // message block
+  stack u32[64] sch;   // message schedule
   
+  inline int i;
+  inline int j;
+  while (i<num_last_blocks) {
+    // copy the next block of the message word by word
+    for j=0 to 16 {
+      block[j] = last_blocks[i*16 + j];
+    }
+
+    sch = __f_sch(block);               // compute the message schedule
+    ihv = __f_loop(ihv, sch, SHA256_k); // run the main loop and update the IHVs
+
+    i += 1;
+  }
 
   return ihv;
 }
@@ -282,10 +319,10 @@ inline fn __sha256_ref_alt(reg u64 hash_in mess_in bytes_in) {
   ihv = __init_ihv();
 
   // run the compression function iteratively on message blocks consisting fully of message bytes
-  // ihv = __f_comp_first(ihv, mess_in, num_first_blocks);
+  ihv = __f_comp_first(ihv, mess_in, num_first_blocks);
 
   // run the compression function on the last (two) message block(s) containing padding
-  // ihv = __f_comp_last(ihv, last_blocks, num_last_blocks);
+  //ihv = __f_comp_last(ihv, last_blocks, num_last_blocks);
 
   // set the hash value to the IHVs
   __set_hash(ihv, hash);
