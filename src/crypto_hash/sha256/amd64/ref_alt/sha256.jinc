@@ -15,6 +15,59 @@ inline fn __init_ihv() -> stack u32[8] {
   return ihv;
 }
 
+inline fn __f_pad(reg u64 mess bytes) -> stack u32[32], stack u8 {
+  stack u32[32] last_blocks; // will hold the actual last block(s) with padding
+  stack u8 num_last_blocks;  // number indicating whether one or two blocks are at the end
+  num_last_blocks = 1;
+
+  // compute the quotient and remainder of bytes / block size, where block size = 64 bytes
+  reg u64 quot rest;
+  quot   = bytes;
+  quot >>= 6;     // rightshift 6 = quotient of divide by 2^6=64
+  rest   = bytes;
+  rest  &= 0x7F;  // AND with bitmask 0x7F=0b111111 = remainder of divide by 2^6=64
+
+  // need 8 bytes to encode the length and 1 byte to encode the separator bit
+  // if the remainder of the message exceeds 64 - 8 - 1 = 55 bytes, need an extra block for padding
+  if rest > 55 {
+    num_last_blocks = 2; // need an extra block
+  }
+
+  // copy the bytes of the last block of the message
+  reg u64 mess_i; // byte index of the last block of the message
+  mess_i  = quot; // set to the number of blocks
+  mess_i -= 1;    // set to the second-to-last block
+  mess_i *= 64;   // multiply by bytes per block
+  inline u64 i;
+  i = 0;
+  while (i<rest) {
+    last_blocks[u8 (int) i] = (u8)[mess + mess_i + i];
+    i += 1;
+  }
+
+  // add the single padding bit
+  last_blocks[u8 (int) i] = 0x80; // 0x80 = 0b10000000
+  i += 1;
+
+  // fill with zero-padding
+  reg u64 target;
+  if (num_last_blocks == 1) {
+    target = 56;
+  } else {
+    target = 120;
+  }
+
+  while (i<target) {
+    last_blocks[u8 (int) i] = 0x0;
+    i += 1;
+  }
+
+  // append the message length
+  last_blocks[i] = bytes;
+
+  return last_blocks, num_last_blocks;
+}
+
 // sigma_0 fuction for confuscating words for the message schedule
 inline fn __sigma_0(reg u32 w) -> reg u32 {
   // compute the two right rotations and the right shift
@@ -76,66 +129,32 @@ inline fn __Sigma_1(reg u32 w) -> reg u32 {
 // compute the next word for the message schedule
 inline fn __f_word(reg u32 w_i2 w_i7 w_i15 w_i16) -> reg u32 {
   reg u32 w_i temp;
+
   temp = __sigma_1(w_i15);
   w_i  = __sigma_0(w_i2);
   w_i += w_i7;
   w_i += temp;
   w_i += w_i16;
+
   return w_i;
 }
 
-inline fn __f_pad(reg u64 mess bytes) -> stack u32[32], stack u8 {
-  stack u32[32] last_blocks; // will hold the actual last block(s) with padding
-  stack u8 num_last_blocks;  // number indicating whether one or two blocks are at the end
-  num_last_blocks = 1;
+// take a message block and produce a message schedule from it
+inline fn __f_sch(stack u32[16] block) -> reg u32[64] {
+  reg u32[64] sch; // message schedule
 
-  // compute the quotient and remainder of bytes / block size, where block size = 64 bytes
-  reg u64 quot rest;
-  quot   = bytes;
-  quot >>= 6;     // rightshift 6 = quotient of divide by 2^6=64
-  rest   = bytes;
-  rest  &= 0x7F;  // AND with bitmask 0x7F=0b111111 = remainder of divide by 2^6=64
-
-  // need 8 bytes to encode the length and 1 byte to encode the separator bit
-  // if the remainder of the message exceeds 64 - 8 - 1 = 55 bytes, need an extra block for padding
-  if rest > 55 {
-    num_last_blocks = 2; // need an extra block
+  // copy the message block into the first 16 words
+  inline int i;
+  for i=0 to 16 {
+    sch[i] = block[i];
   }
 
-  // copy the bytes of the last block of the message
-  reg u64 mess_i; // byte index of the last block of the message
-  mess_i  = quot; // set to the number of blocks
-  mess_i -= 1;    // set to the second-to-last block
-  mess_i *= 64;   // multiply by bytes per block
-  inline u64 i;
-  i = 0;
-  while (i<rest) {
-    last_blocks[u8 (int) i] = (u8)[mess + mess_i + i];
-    i += 1;
+  // compute the rest of the words in the message schedule
+  for i=16 to 64 {
+    sch[i] = __f_word(sch[i-2], sch[i-7], sch[i-15], sch[i-16]);
   }
 
-  // add the single padding bit
-  last_blocks[u8 (int) i] = 0x80; // 0x80 = 0b10000000
-  i += 1;
-
-
-  // fill with zero-padding
-  reg u64 target;
-  if (num_last_blocks == 1) {
-    target = 56;
-  } else {
-    target = 120;
-  }
-
-  while (i<target) {
-    last_blocks[u8 (int) i] = 0x0;
-    i += 1;
-  }
-
-  // append the message length
-  last_blocks[i] = bytes;
-
-  return last_blocks, num_last_blocks;
+  return sch; // return the entire message schedule
 }
 
 // take the IHVs from the stack, swap their byte order, and overwrite the hash value
@@ -154,7 +173,7 @@ inline fn __set_hash(stack u32[8] ihv, reg u64 hash) {
 inline fn __sha256_ref_alt(reg u64 hash_in mess_in bytes_in) {
   // store the parameter addresses on the stack
   stack u64 hash;
-  hash  = hash_in;
+  hash = hash_in;
 
   // compute the message padding
   stack u32[32] last_blocks; // space for two blocks of 512 bits, split in 32-bit words
