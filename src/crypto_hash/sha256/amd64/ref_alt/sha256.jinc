@@ -233,7 +233,7 @@ inline fn __f_loop(stack u32[8] ihv, stack u32[64] w, stack u32[64] k) -> stack 
   // copy the IHVs into the working variables
   inline int j;
   for j=0 to 8 {
-    t[j] = ihv[j];      
+    t[j] = ihv[j];
   }
 
   // run the round function 64 times on the working variables
@@ -242,12 +242,16 @@ inline fn __f_loop(stack u32[8] ihv, stack u32[64] w, stack u32[64] k) -> stack 
     t = f_rou(t, w[i], k[i]);
   }
 
-  ihv = t;    // update the IHVs to the values of the working variables
+  // copy the working variables into the IHVs
+  for j=0 to 8 {
+    ihv[j] = t[j];      
+  }
+
   return ihv; // return the updated IHVs
 }
 
 // process the message blocks that consist entirely of message bytes
-inline fn __f_comp_first(stack u32[8] ihv, stack u64 mess num_first_blocks) -> stack u32[8] {
+inline fn __f_comp_first(stack u32[8] ihv, stack u64 num_first_blocks, reg u64 mess) -> stack u32[8] {
   stack u32[16] block; // message block
   stack u32[64] sch;   // message schedule
   
@@ -302,6 +306,13 @@ inline fn __set_hash(stack u32[8] ihv, reg u64 hash) {
   }
 }
 
+inline fn __overwrite_stack(stack u32[8] ihv new_ihv) {
+  inline int i;
+  for i=0 to 8 {
+    ihv[i] = new_ihv[i];
+  }
+}
+
 // take a byte sequence mess_in with length bytes_in, and compute and store its hash value at hash_in
 inline fn __sha256_ref_alt(reg u64 hash_in mess_in bytes_in) {
   // store the parameter addresses on the stack
@@ -315,14 +326,16 @@ inline fn __sha256_ref_alt(reg u64 hash_in mess_in bytes_in) {
   num_first_blocks, last_blocks, num_last_blocks = __f_pad(mess_in, bytes_in);
 
   // initialise the IHVs on the stack
-  stack u32[8] ihv;
+  stack u32[8] ihv new_ihv;
   ihv = __init_ihv();
 
   // run the compression function iteratively on message blocks consisting fully of message bytes
-  ihv = __f_comp_first(ihv, mess_in, num_first_blocks);
+  new_ihv = __f_comp_first(ihv, mess_in, num_first_blocks);
+  __overwrite_stack(ihv, new_ihv);
 
   // run the compression function on the last (two) message block(s) containing padding
-  //ihv = __f_comp_last(ihv, last_blocks, num_last_blocks);
+  new_ihv = __f_comp_last(ihv, last_blocks, num_last_blocks);
+  __overwrite_stack(ihv, new_ihv);
 
   // set the hash value to the IHVs
   __set_hash(ihv, hash);
