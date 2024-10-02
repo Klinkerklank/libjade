@@ -3,16 +3,13 @@ require "sha256_constants.jinc"
 
 // initialise the intermediate hash values (IHVs)
 inline fn __init_ihv() -> stack u32[8] {
-  // initial values of the IHVs according to the Secure Hash Standard (SHS)
   stack u32[8] ihv;
-  ihv[0] = 0x6a09e667;
-  ihv[1] = 0xbb67ae85;
-  ihv[2] = 0x3c6ef372;
-  ihv[3] = 0xa54ff53a;
-  ihv[4] = 0x510e527f;
-  ihv[5] = 0x9b05688c;
-  ihv[6] = 0x1f83d9ab;
-  ihv[7] = 0x5be0cd19;
+  
+  // copy the values from the sha256_constants file
+  inline int i;
+  for i=0 to 8 {
+    ihv[i] = SHA256_ihv[i];
+  }
   
   return ihv;
 }
@@ -20,9 +17,9 @@ inline fn __init_ihv() -> stack u32[8] {
 // compute how many blocks are filled fully with message bytes,
 // compute whether or or two blocks containing padding are at the end, and
 // compute the last block(s) with padding
-inline fn __f_pad(reg u64 mess bytes) -> stack u64, stack u32[32], stack u8 {
+inline fn __f_pad(reg u64 mess bytes) -> stack u64, stack u32[32], reg u8 {
   stack u32[32] last_blocks; // will hold the actual last block(s) with padding
-  reg u8 num_last_blocks;  // number indicating whether one or two blocks are at the end
+  reg u8 num_last_blocks;    // number indicating whether one or two blocks are at the end
   num_last_blocks = 1;
 
   // compute the quotient and remainder of bytes / block size, where block size = 64 bytes
@@ -30,7 +27,7 @@ inline fn __f_pad(reg u64 mess bytes) -> stack u64, stack u32[32], stack u8 {
   quot   = bytes;
   quot >>= 6;     // rightshift 6 = quotient of divide by 2^6=64
   rest   = bytes;
-  rest  &= 0x7F;  // AND with bitmask 0x7F=0b111111 = remainder of divide by 2^6=64
+  rest  &= 0x3F;  // AND with bitmask 0x3F=0b00111111 = remainder of divide by 2^6=64
 
   // need 8 bytes to encode the length and 1 byte to encode the separator bit
   // if the remainder of the message exceeds 64 - 8 - 1 = 55 bytes, need an extra block for padding
@@ -40,8 +37,8 @@ inline fn __f_pad(reg u64 mess bytes) -> stack u64, stack u32[32], stack u8 {
 
   // copy the bytes of the last block of the message
   reg u64 mess_i; // byte index of the last block of the message
-  mess_i  = quot; // set to the number of blocks
-  mess_i *= 64;   // multiply by bytes per block
+  mess_i   = quot; // set to the number of blocks
+  mess_i <<= 6;    // multiply by 64 bytes per block
   reg u64 i;
   i = 0;
   while (i<rest) {
@@ -54,59 +51,69 @@ inline fn __f_pad(reg u64 mess bytes) -> stack u64, stack u32[32], stack u8 {
   last_blocks[u8 (int) i] = 0x80; // 0x80 = 0b10000000
   i += 1;
 
-  // fill with zero-padding
+  // fill with zero-padding: find target index to fill to
   reg u64 target;
   if (num_last_blocks == 1) {
-    target = 56;
-  } else { // two blocks are needed
-    target = 120;
+    target = 56;  // 64 - 8 bytes for the length encoding
+  } else {        // two blocks are needed
+    target = 120; // 128 - 8 bytes for the length encoding
   }
 
+  // fill with zero-padding: actually write zeroes
   while (i<target) {
     last_blocks[u8 (int) i] = 0x0;
     i += 1;
   }
 
   // append the message length
-  last_blocks[i] = bytes;
+  target >>= 3; // convert to index of 64-bit word
+  bytes <<= 3;  // convert to number of bits
+  bytes = #BSWAP_64(bytes);
+  last_blocks[u64 (int) target] = bytes;
 
   stack u64 stack_quot;
   stack_quot = quot;
   return stack_quot, last_blocks, num_last_blocks;
 }
 
+// take the IHVs from the stack, and overwrite the hash value
+inline fn __set_hash(stack u32[8] ihv, reg u64 hash) {
+  inline int i;
+  for i=0 to 8 {
+    (u32)[hash + i*4] = ihv[i];
+  }
+}
+
 // sigma_0 fuction for confuscating words for the message schedule
 inline fn __sigma_0(reg u32 w) -> reg u32 {
   // compute the two right rotations and the right shift
-  reg u32 w1 w2 w3;
+  reg u32 w1 w2;
   w1 = w;
   w2 = w;
-  w3 = w;
-  _, _, w1 = #ROR_32(w1, 7);  // w rot 7
-  _, _, w2 = #ROR_32(w2, 18); // w rot 18
-  w3 >>= 3;                   // w >>  3
+  _, _, w  = #ROR_32(w,  7);  // w rot 7
+  _, _, w1 = #ROR_32(w1, 18); // w rot 18
+  w2 >>= 3;                   // w >>  3
   
-  w1 ^= w2;                   // (w rot 7) ^ (w rot 18)
-  w1 ^= w3;                   // (w rot 7) ^ (w rot 18) ^ (w >> 3)
+  w ^= w1;                    // (w rot 7) ^ (w rot 18)
+  w ^= w2;                    // (w rot 7) ^ (w rot 18) ^ (w >> 3)
 
-  return w1;                  // (w rot 7) ^ (w rot 18) ^ (w >> 3)
+  return w;                   // (w rot 7) ^ (w rot 18) ^ (w >> 3)
 }
 
 // sigma_1 fuction for confuscating words for the message schedule
 inline fn __sigma_1(reg u32 w) -> reg u32 {
   // compute the two right rotations and the right shift
-  reg u32 w1 w2 w3;
+  reg u32 w1 w2;
   w1 = w;
   w2 = w;
-  w3 = w;
-  _, _, w1 = #ROR_32(w1, 17); // w rot 17
-  _, _, w2 = #ROR_32(w2, 19); // w rot 19
-  w3 >>= 10;                  // w >>  10
+  _, _, w  = #ROR_32(w,  17); // w rot 17
+  _, _, w1 = #ROR_32(w1, 19); // w rot 19
+  w2 >>= 10;                  // w >>  10
   
-  w1 ^= w2;                   // (w rot 17) ^ (w rot 19)
-  w1 ^= w3;                   // (w rot 17) ^ (w rot 19) ^ (w >> 10)
+  w ^= w1;                    // (w rot 17) ^ (w rot 19)
+  w ^= w2;                    // (w rot 17) ^ (w rot 19) ^ (w >> 10)
 
-  return w1;                  // (w rot 17) ^ (w rot 19) ^ (w >> 10)
+  return w;                   // (w rot 17) ^ (w rot 19) ^ (w >> 10)
 }
 
 // compute the next word for the message schedule
@@ -143,67 +150,65 @@ inline fn __f_sch(stack u32[16] block) -> stack u32[64] {
 // Sigma_0 fuction for confuscating words in the main loop
 inline fn __Sigma_0(reg u32 w) -> reg u32 {
   // compute the three right rotations
-  reg u32 w1 w2 w3;
-  w1 = w; w2 = w; w3 = w;
+  reg u32 w1 w2;
+  w1 = w; w2 = w;
 
-  _, _, w1 = #ROR_32(w1, 2);  // w rot 2
-  _, _, w2 = #ROR_32(w2, 13); // w rot 13
-  _, _, w3 = #ROR_32(w3, 22); // w rot 22
+  _, _, w  = #ROR_32(w,   2); // w rot 2
+  _, _, w1 = #ROR_32(w1, 13); // w rot 13
+  _, _, w2 = #ROR_32(w2, 22); // w rot 22
   
-  w1 ^= w2;                   // (w rot 2) ^ (w rot 13)
-  w1 ^= w3;                   // (w rot 2) ^ (w rot 13) ^ (w rot 22)
+  w ^= w1;                    // (w rot 2) ^ (w rot 13)
+  w ^= w2;                    // (w rot 2) ^ (w rot 13) ^ (w rot 22)
 
-  return w1;                  // (w rot 2) ^ (w rot 13) ^ (w rot 22)
+  return w;                   // (w rot 2) ^ (w rot 13) ^ (w rot 22)
 }
 
 // Sigma_1 fuction for confuscating words in the main loop
 inline fn __Sigma_1(reg u32 w) -> reg u32 {
   // compute the three right rotations
-  reg u32 w1 w2 w3;
-  w1 = w; w2 = w; w3 = w;
+  reg u32 w1 w2;
+  w1 = w; w2 = w;
 
-  _, _, w1 = #ROR_32(w1, 6);  // w rot 6
-  _, _, w2 = #ROR_32(w2, 11); // w rot 11
-  _, _, w3 = #ROR_32(w3, 25); // w rot 25
+  _, _, w  = #ROR_32(w,   6); // w rot 6
+  _, _, w1 = #ROR_32(w1, 11); // w rot 11
+  _, _, w2 = #ROR_32(w2, 25); // w rot 25
   
-  w1 ^= w2;                   // (w rot 6) ^ (w rot 11)
-  w1 ^= w3;                   // (w rot 6) ^ (w rot 11) ^ (w rot 25)
+  w ^= w1;                    // (w rot 6) ^ (w rot 11)
+  w ^= w2;                    // (w rot 6) ^ (w rot 11) ^ (w rot 25)
 
-  return w1;                  // (w rot 6) ^ (w rot 11) ^ (w rot 25)
+  return w;                   // (w rot 6) ^ (w rot 11) ^ (w rot 25)
 }
 
 // majority function that computes the bitwise majority of three words
 inline fn __f_maj(reg u32 x y z) -> reg u32 {
-  reg u32 maj temp;
+  reg u32 t;
 
-  maj   = x;    // x
-  maj  &= y;    // x & y
-  temp  = x;    // x
-  temp &= z;    // x & z
-  maj  ^= temp; // (x & y) ^ (x & z)
-  temp  = y;    // y
-  temp &= z;    // y & z
-  maj  ^= temp; // (x & y) ^ (x & z) ^ (y & z)
+  t  = x; // t = x
+  t &= z; // t = (x & z)
+  x &= y; // x = (x & y)
+  x ^= t; // x = (x & y) ^ (x & z)
+  t  = y; // t = y
+  t &= z; // t = (y & z)
+  x ^= t; // x = (x & y) ^ (x & z) ^ (y & z)
 
-  return maj;
+  return x; // (x & y) ^ (x & z) ^ (y & z)
 }
 
 // choice function that selects the bits from y and z based on the bits in x
 inline fn __f_cho(reg u32 x y z) -> reg u32 {
-  reg u32 cho temp;
+  reg u32 t;
 
-  cho   = x;     // x
-  cho  &= y;     // x & y
-  temp  = x;     // x
-  temp  = !temp; // !x
-  temp &= z;     // !x & z
-  cho  ^= temp;  // (x & y) ^ (!x & z)
+  t  =  x; // t = x
+  t  = !t; // t = !x
+  t &=  z; // t = (!x & z)
+  x &=  y; // x = (x & y)
+  x ^=  t; // x = (x & y) ^ (!x & z)
 
-  return cho;
+  return x; // (x & y) ^ (!x & z)
 }
 
 // round function that takes the working variables and updates them
-inline fn f_rou(reg u32[8] t, reg u32 w_i k_i) -> reg u32[8] {
+inline fn f_rou(stack u32[8] t, reg u32 w_i k_i) -> stack u32[8] {
   reg u32 t_1 t_2 fun;
 
   // compute t_1
@@ -236,8 +241,10 @@ inline fn f_rou(reg u32[8] t, reg u32 w_i k_i) -> reg u32[8] {
 }
 
 // main loop that takes and updates the IHVs through iterated calls of the round function
-inline fn __f_loop(stack u32[8] ihv, stack u32[64] w, stack u32[64] k) -> stack u32[8] {
-  reg u32[8] t; // working variables
+inline fn __f_loop(stack u32[8] ihv, stack u32[64] w) -> stack u32[8] {
+  stack u32[8] t; // working variables
+  stack u32[64] k; // loop constants
+  k = SHA256_k;
 
   // copy the IHVs into the working variables
   inline int j;
@@ -268,12 +275,14 @@ inline fn __f_comp_first(stack u32[8] ihv, stack u64 num_first_blocks, reg u64 m
   inline int j;
   while (i<num_first_blocks) {
     // copy the next block of the message word by word
+    reg u64 i2;
+    i2 <<= 4;
     for j=0 to 16 {
-      block[j] = (u32)[mess + i*16 + j];
+      block[j] = (u32)[mess + i2 + j];
     }
 
-    sch = __f_sch(block);               // compute the message schedule
-    ihv = __f_loop(ihv, sch, SHA256_k); // run the main loop and update the IHVs
+    sch = __f_sch(block);     // compute the message schedule
+    ihv = __f_loop(ihv, sch); // run the main loop and update the IHVs
 
     i += 1;
   }
@@ -290,12 +299,14 @@ inline fn __f_comp_last(stack u32[8] ihv, stack u32[32] last_blocks, stack u8 nu
   inline int j;
   while (i<num_last_blocks) {
     // copy the next block of the message word by word
+    reg u64 i2;
+    i2 <<= 4;
     for j=0 to 16 {
-      block[j] = last_blocks[i*16 + j];
+      block[j] = last_blocks[i2 + j];
     }
 
-    sch = __f_sch(block);               // compute the message schedule
-    ihv = __f_loop(ihv, sch, SHA256_k); // run the main loop and update the IHVs
+    sch = __f_sch(block);     // compute the message schedule
+    ihv = __f_loop(ihv, sch); // run the main loop and update the IHVs
 
     i += 1;
   }
@@ -303,51 +314,37 @@ inline fn __f_comp_last(stack u32[8] ihv, stack u32[32] last_blocks, stack u8 nu
   return ihv;
 }
 
-// take the IHVs from the stack, swap their byte order, and overwrite the hash value
-inline fn __set_hash(stack u32[8] ihv, reg u64 hash) {
-  reg u32 swap;
-
-  inline int i;
-  for i=0 to 8 {
-    swap = ihv[i];            // copy one 32-bit word of the IHVs from the stack into a reg
-    swap = #BSWAP_32(swap);   // swap the byte order (#BSWAP_32 requires a reg argument)
-    (u32)[hash + i*4] = swap; // write the swapped word to the hash value
-  }
-}
-
-inline fn __overwrite_stack(stack u32[8] ihv new_ihv) {
-  inline int i;
-  for i=0 to 8 {
-    ihv[i] = new_ihv[i];
-  }
-}
-
-// take a byte sequence mess_in with length bytes_in, and compute and store its hash value at hash_in
-inline fn __sha256_ref_alt(reg u64 hash_in mess_in bytes_in) {
+// take a byte sequence mess_addr with length bytes, and compute and store its hash value at hash_addr_in
+inline fn __sha256_ref_alt(reg u64 hash_addr_in mess_addr bytes) {
   // store the parameter addresses on the stack
-  stack u64 hash;
-  hash = hash_in;
+  stack u64 hash_addr_st; // hash address on the stack
+  hash_addr_st = hash_addr_in;
 
   // compute the message padding
   stack u64 num_first_blocks; // number indicating the number of blocks fully filled with message bytes
-  reg u8 num_last_blocks;     // number indicating the number of blocks containing padding
+  reg u8 num_last_blocks;     // number indicating the number of blocks containing padding (1 or 2)
   stack u32[32] last_blocks;  // space for two blocks of 512 bits, split in 32-bit words
-  num_first_blocks, last_blocks, num_last_blocks = __f_pad(mess_in, bytes_in);
+  num_first_blocks, last_blocks, num_last_blocks = __f_pad(mess_addr, bytes);
 
   // initialise the IHVs on the stack
-  stack u32[8] ihv new_ihv;
+  stack u32[8] ihv;
   ihv = __init_ihv();
 
+  // inline int i;
+  // for i=0 to 8 {
+  //   ihv[i] = last_blocks[i+8];
+  // }
+
   // run the compression function iteratively on message blocks consisting fully of message bytes
-  ihv = __f_comp_first(ihv, mess_in, num_first_blocks);
-  //__overwrite_stack(ihv, new_ihv);
+  //ihv = __f_comp_first(ihv, mess_addr, num_first_blocks);
 
   // run the compression function on the last (two) message block(s) containing padding
   ihv = __f_comp_last(ihv, last_blocks, num_last_blocks);
-  //__overwrite_stack(ihv, new_ihv);
 
   // set the hash value to the IHVs
-  __set_hash(ihv, hash);
+  reg u64 hash_addr;        // hash address
+  hash_addr = hash_addr_st; // copy the hash address from the stack
+  __set_hash(ihv, hash_addr);
 }
 
 
