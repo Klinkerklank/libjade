@@ -4,11 +4,14 @@ require "sha256_constants.jinc"
 // initialise the intermediate hash values (IHVs)
 inline fn __init_ihv() -> stack u32[8] {
   stack u32[8] ihv;
+  reg u32 swap;
   
   // copy the values from the sha256_constants file
   inline int i;
   for i=0 to 8 {
-    ihv[i] = SHA256_ihv[i];
+    swap = SHA256_ihv[i];
+    swap = #BSWAP_32(swap);
+    ihv[i] = swap;
   }
   
   return ihv;
@@ -17,9 +20,9 @@ inline fn __init_ihv() -> stack u32[8] {
 // compute how many blocks are filled fully with message bytes,
 // compute whether or or two blocks containing padding are at the end, and
 // compute the last block(s) with padding
-inline fn __f_pad(reg u64 mess bytes) -> stack u64, stack u32[32], reg u8 {
+inline fn __f_pad(reg u64 mess bytes) -> stack u64, stack u32[32], reg u64 {
   stack u32[32] last_blocks; // will hold the actual last block(s) with padding
-  reg u8 num_last_blocks;    // number indicating whether one or two blocks are at the end
+  reg u64 num_last_blocks;    // number indicating whether one or two blocks are at the end
   num_last_blocks = 1;
 
   // compute the quotient and remainder of bytes / block size, where block size = 64 bytes
@@ -73,15 +76,9 @@ inline fn __f_pad(reg u64 mess bytes) -> stack u64, stack u32[32], reg u8 {
 
   stack u64 stack_quot;
   stack_quot = quot;
-  return stack_quot, last_blocks, num_last_blocks;
-}
-
-// take the IHVs from the stack, and overwrite the hash value
-inline fn __set_hash(stack u32[8] ihv, reg u64 hash) {
-  inline int i;
-  for i=0 to 8 {
-    (u32)[hash + i*4] = ihv[i];
-  }
+  stack u64 stack_num_last_blocks;
+  stack_num_last_blocks = num_last_blocks;
+  return stack_quot, last_blocks, stack_num_last_blocks;
 }
 
 // sigma_0 fuction for confuscating words for the message schedule
@@ -117,22 +114,24 @@ inline fn __sigma_1(reg u32 w) -> reg u32 {
 }
 
 // compute the next word for the message schedule
-inline fn __f_word(reg u32 w_i2 w_i7 w_i15 w_i16) -> reg u32 {
+inline fn __f_word(stack u32 stack_w_i w_i2 w_i7 w_i15 w_i16) -> stack u32 {
   reg u32 w_i temp;
-  temp = __sigma_0(w_i15);
+  temp = w_i15;
+  temp = __sigma_0(temp);
 
-  w_i  = __sigma_1(w_i2);  // sigma_1(w_{i-2})
-  w_i += w_i7;             // sigma_1(w_{i-2}) + w_{i-7}
-  w_i += temp;             // sigma_1(w_{i-2}) + w_{i-7} + sigma_0(w_{i-15})
-  w_i += w_i16;            // sigma_1(w_{i-2}) + w_{i-7} + sigma_0(w_{i-15}) + w_{i-16}
+  w_i  = w_i2;           // w_{i-2}
+  w_i  = __sigma_1(w_i); // sigma_1(w_{i-2})
+  w_i += w_i7;           // sigma_1(w_{i-2}) + w_{i-7}
+  w_i += temp;           // sigma_1(w_{i-2}) + w_{i-7} + sigma_0(w_{i-15})
+  w_i += w_i16;          // sigma_1(w_{i-2}) + w_{i-7} + sigma_0(w_{i-15}) + w_{i-16}
 
-  return w_i;              // sigma_1(w_{i-2}) + w_{i-7} + sigma_0(w_{i-15}) + w_{i-16}
+  w_i = #BSWAP_32(w_i);
+  stack_w_i = w_i;
+  return stack_w_i;      // sigma_1(w_{i-2}) + w_{i-7} + sigma_0(w_{i-15}) + w_{i-16}
 }
 
 // take a message block and produce a message schedule from it
-inline fn __f_sch(stack u32[16] block) -> stack u32[64] {
-  stack u32[64] sch; // message schedule
-
+inline fn __f_sch(stack u32[64] sch, stack u32[16] block) -> stack u32[64] {
   // copy the message block into the first 16 words
   inline int i;
   for i=0 to 16 {
@@ -141,7 +140,13 @@ inline fn __f_sch(stack u32[16] block) -> stack u32[64] {
 
   // compute the rest of the words in the message schedule
   for i=16 to 64 {
-    sch[i] = __f_word(sch[i-2], sch[i-7], sch[i-15], sch[i-16]);
+    reg u32[4] sch_s;
+    sch_s[0] = sch[i-2];  sch_s[0] = #BSWAP_32(sch_s[0]);
+    sch_s[1] = sch[i-7];  sch_s[1] = #BSWAP_32(sch_s[1]);
+    sch_s[2] = sch[i-15]; sch_s[2] = #BSWAP_32(sch_s[2]);
+    sch_s[3] = sch[i-16]; sch_s[3] = #BSWAP_32(sch_s[3]);
+
+    sch[i] = __f_word(sch[i], sch_s[0], sch_s[1], sch_s[2], sch_s[3]);
   }
 
   return sch; // return the entire message schedule
@@ -241,7 +246,7 @@ inline fn f_rou(stack u32[8] t, reg u32 w_i k_i) -> stack u32[8] {
 }
 
 // main loop that takes and updates the IHVs through iterated calls of the round function
-inline fn __f_loop(stack u32[8] ihv, stack u32[64] w) -> stack u32[8] {
+inline fn __f_loop(stack u32[8] ihv, stack u32[64] sch) -> stack u32[8] {
   stack u32[8] t; // working variables
   stack u32[64] k; // loop constants
   k = SHA256_k;
@@ -255,12 +260,12 @@ inline fn __f_loop(stack u32[8] ihv, stack u32[64] w) -> stack u32[8] {
   // run the round function 64 times on the working variables
   inline int i;
   for i=0 to 64 {
-    t = f_rou(t, w[i], k[i]);
+    t = f_rou(t, sch[i], k[i]);
   }
 
   // copy the working variables into the IHVs
   for j=0 to 8 {
-    ihv[j] = t[j];      
+    ihv[j] = t[j];
   }
 
   return ihv; // return the updated IHVs
@@ -276,13 +281,14 @@ inline fn __f_comp_first(stack u32[8] ihv, stack u64 num_first_blocks, reg u64 m
   while (i<num_first_blocks) {
     // copy the next block of the message word by word
     reg u64 i2;
+    i2 = i;
     i2 <<= 4;
     for j=0 to 16 {
       block[j] = (u32)[mess + i2 + j];
     }
 
-    sch = __f_sch(block);     // compute the message schedule
-    ihv = __f_loop(ihv, sch); // run the main loop and update the IHVs
+    sch = __f_sch(sch, block); // compute the message schedule
+    ihv = __f_loop(ihv, sch);  // run the main loop and update the IHVs
 
     i += 1;
   }
@@ -291,27 +297,41 @@ inline fn __f_comp_first(stack u32[8] ihv, stack u64 num_first_blocks, reg u64 m
 }
 
 // process the message blocks that comprise the blocks with padding
-inline fn __f_comp_last(stack u32[8] ihv, stack u32[32] last_blocks, stack u8 num_last_blocks) -> stack u32[8] {
+inline fn __f_comp_last(stack u32[8] ihv, stack u32[32] last_blocks, stack u64 num_last_blocks) -> stack u32[8] {
   stack u32[16] block; // message block
   stack u32[64] sch;   // message schedule
   
   reg u64 i;
-  inline int j;
+  i = 0;
   while (i<num_last_blocks) {
     // copy the next block of the message word by word
     reg u64 i2;
+    i2 = i;
     i2 <<= 4;
+    inline int j;
     for j=0 to 16 {
       block[j] = last_blocks[i2 + j];
     }
 
-    sch = __f_sch(block);     // compute the message schedule
-    ihv = __f_loop(ihv, sch); // run the main loop and update the IHVs
+    sch = __f_sch(sch, block); // compute the message schedule
+    ihv = __f_loop(ihv, sch);  // run the main loop and update the IHVs
 
     i += 1;
   }
 
   return ihv;
+}
+
+// take the IHVs from the stack, and overwrite the hash value
+inline fn __set_hash(stack u32[8] ihv, reg u64 hash) {
+  inline int i;
+  for i=0 to 8 {
+    // reg u32 swap;
+    // swap = ihv[i];
+    // swap = #BSWAP_32(swap);
+    // (u32)[hash + i*4] = swap;
+    (u32)[hash + i*4] = ihv[i];
+  }
 }
 
 // take a byte sequence mess_addr with length bytes, and compute and store its hash value at hash_addr_in
@@ -322,7 +342,7 @@ inline fn __sha256_ref_alt(reg u64 hash_addr_in mess_addr bytes) {
 
   // compute the message padding
   stack u64 num_first_blocks; // number indicating the number of blocks fully filled with message bytes
-  reg u8 num_last_blocks;     // number indicating the number of blocks containing padding (1 or 2)
+  stack u64 num_last_blocks;  // number indicating the number of blocks containing padding (1 or 2)
   stack u32[32] last_blocks;  // space for two blocks of 512 bits, split in 32-bit words
   num_first_blocks, last_blocks, num_last_blocks = __f_pad(mess_addr, bytes);
 
@@ -330,17 +350,64 @@ inline fn __sha256_ref_alt(reg u64 hash_addr_in mess_addr bytes) {
   stack u32[8] ihv;
   ihv = __init_ihv();
 
+  // check the number of blocks without padding
+  // ihv[u64 0] = num_first_blocks;
+
+  // check the number of blocks with padding
+  // ihv[u64 0] = num_last_blocks;
+
+  // check the blocks with padding
   // inline int i;
   // for i=0 to 8 {
-  //   ihv[i] = last_blocks[i+8];
+  //   ihv[i] = last_blocks[i];
   // }
 
   // run the compression function iteratively on message blocks consisting fully of message bytes
-  //ihv = __f_comp_first(ihv, mess_addr, num_first_blocks);
+  // ihv = __f_comp_first(ihv, mess_addr, num_first_blocks);
 
   // run the compression function on the last (two) message block(s) containing padding
   ihv = __f_comp_last(ihv, last_blocks, num_last_blocks);
 
+  // stack u32 w_i2 w_i7 w_i15 w_i16 test t1 t2 t3; reg u32 w_i;
+
+  // w_i2  = 0xEC8726CB;
+  // w_i7  = 0xC8215C1A;
+  // w_i15 = 0x61626380;
+  // w_i16 = 0x00000018;
+  // w_i = __f_word(w_i2, w_i7, w_i15, w_i16);
+  // ihv[0] = w_i; // should be 0xD3B7973B
+
+  // w_i2  = 0x00000018;
+  // w_i7  = 0x00000000;
+  // w_i15 = 0x00000000;
+  // w_i16 = 0x00000000;
+  // w_i = __f_word(w_i, w_i2, w_i7, w_i15, w_i16);
+  // ihv[0] = w_i; // should be 0x000F0000
+
+  // test = 0x61626380;
+  // test = __sigma_0(test);
+  // ihv[0] = test; // should be 940E90EF
+
+  // test = 0xEC8726CB;
+  // test = __sigma_1(test);
+  // ihv[0] = test; // should be 7787AA1A
+
+  // t1  = 0x7787AA1A;
+  // t2  = 0xC8215C1A;
+  // t3  = t1;
+  // t3 += t2;
+  // ihv[0] = t3; // should be 3FA90634
+
+  // stack u32[16] block;
+  // stack u32[64] sch;
+  // inline int j;
+  // for j=0 to 16 {
+  //   block[j] = last_blocks[j];
+  // }
+  // for j=0 to 8 {
+  //   ihv[j] = block[j];
+  // }
+  
   // set the hash value to the IHVs
   reg u64 hash_addr;        // hash address
   hash_addr = hash_addr_st; // copy the hash address from the stack
