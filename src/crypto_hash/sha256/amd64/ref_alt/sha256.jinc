@@ -155,15 +155,16 @@ inline fn __f_sch(stack u32[64] sch, stack u32[16] block) -> stack u32[64] {
 // Sigma_0 fuction for confuscating words in the main loop
 inline fn __Sigma_0(reg u32 w) -> reg u32 {
   // compute the three right rotations
-  reg u32 w1 w2;
-  w1 = w; w2 = w;
+  reg u32 w1 w2 w3;
+  w1 = w; w2 = w; w3 = w;
 
-  _, _, w  = #ROR_32(w,   2); // w rot 2
-  _, _, w1 = #ROR_32(w1, 13); // w rot 13
-  _, _, w2 = #ROR_32(w2, 22); // w rot 22
+  _, _, w1 = #ROR_32(w1,  2); // w rot 2
+  _, _, w2 = #ROR_32(w2, 13); // w rot 13
+  _, _, w3 = #ROR_32(w3, 22); // w rot 22
   
-  w ^= w1;                    // (w rot 2) ^ (w rot 13)
-  w ^= w2;                    // (w rot 2) ^ (w rot 13) ^ (w rot 22)
+  w  = w1;
+  w ^= w2;                    // (w rot 2) ^ (w rot 13)
+  w ^= w3;                    // (w rot 2) ^ (w rot 13) ^ (w rot 22)
 
   return w;                   // (w rot 2) ^ (w rot 13) ^ (w rot 22)
 }
@@ -171,29 +172,32 @@ inline fn __Sigma_0(reg u32 w) -> reg u32 {
 // Sigma_1 fuction for confuscating words in the main loop
 inline fn __Sigma_1(reg u32 w) -> reg u32 {
   // compute the three right rotations
-  reg u32 w1 w2;
-  w1 = w; w2 = w;
+  reg u32 w1 w2 w3;
+  w1 = w; w2 = w; w3 = w;
 
-  _, _, w  = #ROR_32(w,   6); // w rot 6
-  _, _, w1 = #ROR_32(w1, 11); // w rot 11
-  _, _, w2 = #ROR_32(w2, 25); // w rot 25
+  _, _, w1 = #ROR_32(w1,  6); // w rot 6
+  _, _, w2 = #ROR_32(w2, 11); // w rot 11
+  _, _, w3 = #ROR_32(w3, 25); // w rot 25
   
-  w ^= w1;                    // (w rot 6) ^ (w rot 11)
-  w ^= w2;                    // (w rot 6) ^ (w rot 11) ^ (w rot 25)
+  w  = w1;
+  w ^= w2;                    // (w rot 6) ^ (w rot 11)
+  w ^= w3;                    // (w rot 6) ^ (w rot 11) ^ (w rot 25)
 
   return w;                   // (w rot 6) ^ (w rot 11) ^ (w rot 25)
 }
 
 // majority function that computes the bitwise majority of three words
 inline fn __f_maj(reg u32 x y z) -> reg u32 {
-  reg u32 t;
+  reg u32 t u;
 
   t  = x; // t = x
   t &= z; // t = (x & z)
-  x &= y; // x = (x & y)
-  x ^= t; // x = (x & y) ^ (x & z)
+  u  = x;
+  u &= y; // x = (x & y)
+  u ^= t; // x = (x & y) ^ (x & z)
   t  = y; // t = y
   t &= z; // t = (y & z)
+  x  = u;
   x ^= t; // x = (x & y) ^ (x & z) ^ (y & z)
 
   return x; // (x & y) ^ (x & z) ^ (y & z)
@@ -201,19 +205,21 @@ inline fn __f_maj(reg u32 x y z) -> reg u32 {
 
 // choice function that selects the bits from y and z based on the bits in x
 inline fn __f_cho(reg u32 x y z) -> reg u32 {
-  reg u32 t;
+  reg u32 t u;
 
   t  =  x; // t = x
   t  = !t; // t = !x
   t &=  z; // t = (!x & z)
-  x &=  y; // x = (x & y)
+  u  =  x;
+  u &=  y; // x = (x & y)
+  x  =  u;
   x ^=  t; // x = (x & y) ^ (!x & z)
 
   return x; // (x & y) ^ (!x & z)
 }
 
 // round function that takes the working variables and updates them
-inline fn f_rou(stack u32[8] t, reg u32 w_i k_i) -> stack u32[8] {
+inline fn __f_rou(reg u32[8] t, stack u32 w_i k_i) -> reg u32[8] {
   reg u32 t_1 t_2 fun;
 
   // compute t_1
@@ -226,11 +232,10 @@ inline fn f_rou(stack u32[8] t, reg u32 w_i k_i) -> stack u32[8] {
   t_1 += fun;                      // t_1 = t_h + w_i + k_i + f_cho(t_e, t_f, t_g) + Sigma_1(t_e)
 
   // compute t_2
-  t_2  = t_1;                      // t_2 = t_1
   fun = __f_maj(t[0], t[1], t[2]); // fun = f_maj(t_a, t_b, t_c)
-  t_2 += fun;                      // t_2 = t_1 + f_maj(t_a, t_b, t_c)
+  t_2  = fun;                      // t_2 = f_maj(t_a, t_b, t_c)
   fun = __Sigma_0(t[0]);           // fun = Sigma_0(t_a)
-  t_2 += fun;                      // t_2 = t_1 + f_maj(t_a, t_b, t_c) + Sigma_0(t_a)
+  t_2 += fun;                      // t_2 = f_maj(t_a, t_b, t_c) + Sigma_0(t_a)
 
   // update the working variables
   t[7] = t[6];              // t_h = t_g
@@ -247,24 +252,29 @@ inline fn f_rou(stack u32[8] t, reg u32 w_i k_i) -> stack u32[8] {
 
 // main loop that takes and updates the IHVs through iterated calls of the round function
 inline fn __f_loop(stack u32[8] ihv, stack u32[64] sch) -> stack u32[8] {
-  stack u32[8] t; // working variables
+  reg u32[8]    t; // working variables
   stack u32[64] k; // loop constants
   k = SHA256_k;
+  reg u32 sch_swap;
 
   // copy the IHVs into the working variables
   inline int j;
   for j=0 to 8 {
     t[j] = ihv[j];
+    t[j] = #BSWAP_32(t[j]);
   }
 
   // run the round function 64 times on the working variables
   inline int i;
   for i=0 to 64 {
-    t = f_rou(t, sch[i], k[i]);
+    sch_swap = sch[i];
+    sch_swap = #BSWAP_32(sch_swap);
+    t = __f_rou(t, sch_swap, k[i]);
   }
 
   // copy the working variables into the IHVs
   for j=0 to 8 {
+    t[j] = #BSWAP_32(t[j]);
     ihv[j] = t[j];
   }
 
@@ -326,10 +336,6 @@ inline fn __f_comp_last(stack u32[8] ihv, stack u32[32] last_blocks, stack u64 n
 inline fn __set_hash(stack u32[8] ihv, reg u64 hash) {
   inline int i;
   for i=0 to 8 {
-    // reg u32 swap;
-    // swap = ihv[i];
-    // swap = #BSWAP_32(swap);
-    // (u32)[hash + i*4] = swap;
     (u32)[hash + i*4] = ihv[i];
   }
 }
@@ -350,67 +356,39 @@ inline fn __sha256_ref_alt(reg u64 hash_addr_in mess_addr bytes) {
   stack u32[8] ihv;
   ihv = __init_ihv();
 
-  // check the number of blocks without padding
-  // ihv[u64 0] = num_first_blocks;
-
-  // check the number of blocks with padding
-  // ihv[u64 0] = num_last_blocks;
-
-  // check the blocks with padding
-  // inline int i;
-  // for i=0 to 8 {
-  //   ihv[i] = last_blocks[i];
-  // }
-
   // run the compression function iteratively on message blocks consisting fully of message bytes
   // ihv = __f_comp_first(ihv, mess_addr, num_first_blocks);
 
   // run the compression function on the last (two) message block(s) containing padding
   ihv = __f_comp_last(ihv, last_blocks, num_last_blocks);
 
-  // stack u32 w_i2 w_i7 w_i15 w_i16 test t1 t2 t3; reg u32 w_i;
+  // stack u32 w0 k0;
+  // stack u32[64] k;
+  // reg u32 temp;
+  // k = SHA256_k;
+  // k0 = k[63];
+  // w0 = 0x12B1EDEB;
 
-  // w_i2  = 0xEC8726CB;
-  // w_i7  = 0xC8215C1A;
-  // w_i15 = 0x61626380;
-  // w_i16 = 0x00000018;
-  // w_i = __f_word(w_i2, w_i7, w_i15, w_i16);
-  // ihv[0] = w_i; // should be 0xD3B7973B
+  // reg u32[8] t;
+  // t[0] = 0xd39a2165;
+  // t[1] = 0x04d24d6c;
+  // t[2] = 0xb85e2ce9;
+  // t[3] = 0xb6ae8fff;
+  // t[4] = 0xfb121210;
+  // t[5] = 0x948d25b6;
+  // t[6] = 0x961f4894;
+  // t[7] = 0xb21bad3d;
 
-  // w_i2  = 0x00000018;
-  // w_i7  = 0x00000000;
-  // w_i15 = 0x00000000;
-  // w_i16 = 0x00000000;
-  // w_i = __f_word(w_i, w_i2, w_i7, w_i15, w_i16);
-  // ihv[0] = w_i; // should be 0x000F0000
+  // t = __f_rou(t, w0, k0);
 
-  // test = 0x61626380;
-  // test = __sigma_0(test);
-  // ihv[0] = test; // should be 940E90EF
-
-  // test = 0xEC8726CB;
-  // test = __sigma_1(test);
-  // ihv[0] = test; // should be 7787AA1A
-
-  // t1  = 0x7787AA1A;
-  // t2  = 0xC8215C1A;
-  // t3  = t1;
-  // t3 += t2;
-  // ihv[0] = t3; // should be 3FA90634
-
-  // stack u32[16] block;
-  // stack u32[64] sch;
-  // inline int j;
-  // for j=0 to 16 {
-  //   block[j] = last_blocks[j];
+  // inline int i;
+  // for i=0 to 8 {
+  //   ihv[i] = t[i];
   // }
-  // for j=0 to 8 {
-  //   ihv[j] = block[j];
-  // }
-  
+
   // set the hash value to the IHVs
-  reg u64 hash_addr;        // hash address
-  hash_addr = hash_addr_st; // copy the hash address from the stack
+  reg u64 hash_addr;          // hash address
+  hash_addr = hash_addr_st;   // copy the hash address from the stack
   __set_hash(ihv, hash_addr);
 }
 
