@@ -233,7 +233,7 @@ inline fn __f_rou(reg u32[8] t, stack u32 w_i k_i) -> reg u32[8] {
 
   // compute t_2
   fun = __f_maj(t[0], t[1], t[2]); // fun = f_maj(t_a, t_b, t_c)
-  t_2  = fun;                      // t_2 = f_maj(t_a, t_b, t_c)
+  t_2 = fun;                       // t_2 = f_maj(t_a, t_b, t_c)
   fun = __Sigma_0(t[0]);           // fun = Sigma_0(t_a)
   t_2 += fun;                      // t_2 = f_maj(t_a, t_b, t_c) + Sigma_0(t_a)
 
@@ -272,9 +272,14 @@ inline fn __f_loop(stack u32[8] ihv, stack u32[64] sch) -> stack u32[8] {
     t = __f_rou(t, sch_swap, k[i]);
   }
 
-  // copy the working variables into the IHVs
+  // add the working variables to the IHVs
   for j=0 to 8 {
-    t[j] = #BSWAP_32(t[j]);
+    reg u32 ihv_swap;
+    ihv_swap = ihv[j]; ihv_swap = #BSWAP_32(ihv_swap);
+
+    t[j] += ihv_swap;
+    t[j]  = #BSWAP_32(t[j]);
+
     ihv[j] = t[j];
   }
 
@@ -361,30 +366,6 @@ inline fn __sha256_ref_alt(reg u64 hash_addr_in mess_addr bytes) {
 
   // run the compression function on the last (two) message block(s) containing padding
   ihv = __f_comp_last(ihv, last_blocks, num_last_blocks);
-
-  // stack u32 w0 k0;
-  // stack u32[64] k;
-  // reg u32 temp;
-  // k = SHA256_k;
-  // k0 = k[63];
-  // w0 = 0x12B1EDEB;
-
-  // reg u32[8] t;
-  // t[0] = 0xd39a2165;
-  // t[1] = 0x04d24d6c;
-  // t[2] = 0xb85e2ce9;
-  // t[3] = 0xb6ae8fff;
-  // t[4] = 0xfb121210;
-  // t[5] = 0x948d25b6;
-  // t[6] = 0x961f4894;
-  // t[7] = 0xb21bad3d;
-
-  // t = __f_rou(t, w0, k0);
-
-  // inline int i;
-  // for i=0 to 8 {
-  //   ihv[i] = t[i];
-  // }
 
   // set the hash value to the IHVs
   reg u64 hash_addr;          // hash address
