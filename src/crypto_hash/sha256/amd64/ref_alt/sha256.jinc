@@ -287,19 +287,20 @@ inline fn __f_loop(stack u32[8] ihv, stack u32[64] sch) -> stack u32[8] {
 }
 
 // process the message blocks that consist entirely of message bytes
-inline fn __f_comp_first(stack u32[8] ihv, stack u64 num_first_blocks, reg u64 mess) -> stack u32[8] {
+inline fn __f_comp_first(stack u32[8] ihv, reg u64 mess_addr, stack u64 num_first_blocks) -> stack u32[8] {
   stack u32[16] block; // message block
   stack u32[64] sch;   // message schedule
   
   reg u64 i;
-  inline int j;
+  i = 0;
   while (i<num_first_blocks) {
     // copy the next block of the message word by word
     reg u64 i2;
     i2 = i;
     i2 <<= 4;
+    inline int j;
     for j=0 to 16 {
-      block[j] = (u32)[mess + i2 + j];
+      block[j] = (u32)[mess_addr + i2 + j];
     }
 
     sch = __f_sch(sch, block); // compute the message schedule
@@ -362,7 +363,7 @@ inline fn __sha256_ref_alt(reg u64 hash_addr_in mess_addr bytes) {
   ihv = __init_ihv();
 
   // run the compression function iteratively on message blocks consisting fully of message bytes
-  // ihv = __f_comp_first(ihv, mess_addr, num_first_blocks);
+  ihv = __f_comp_first(ihv, mess_addr, num_first_blocks);
 
   // run the compression function on the last (two) message block(s) containing padding
   ihv = __f_comp_last(ihv, last_blocks, num_last_blocks);
