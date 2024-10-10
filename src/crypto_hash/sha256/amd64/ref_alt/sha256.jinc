@@ -44,7 +44,7 @@ inline fn __f_pad(reg u64 mess bytes) -> stack u64, stack u32[32], reg u64 {
   mess_i <<= 6;    // multiply by 64 bytes per block
   reg u64 i;
   i = 0;
-  while (i<rest) {
+  while (i < rest) {
     last_blocks[u8 (int) i] = (u8)[mess + mess_i];
     i += 1;
     mess_i += 1;
@@ -63,7 +63,7 @@ inline fn __f_pad(reg u64 mess bytes) -> stack u64, stack u32[32], reg u64 {
   }
 
   // fill with zero-padding: actually write zeroes
-  while (i<target) {
+  while (i < target) {
     last_blocks[u8 (int) i] = 0x0;
     i += 1;
   }
@@ -293,14 +293,14 @@ inline fn __f_comp_first(stack u32[8] ihv, reg u64 mess_addr, stack u64 num_firs
   
   reg u64 i;
   i = 0;
-  while (i<num_first_blocks) {
+  while (i < num_first_blocks) {
     // copy the next block of the message word by word
     reg u64 i2;
     i2 = i;
     i2 <<= 4;
     inline int j;
     for j=0 to 16 {
-      block[j] = (u32)[mess_addr + i2 + j];
+      block[j] = (u32)[mess_addr + i2 + 4*j];
     }
 
     sch = __f_sch(sch, block); // compute the message schedule
@@ -319,7 +319,7 @@ inline fn __f_comp_last(stack u32[8] ihv, stack u32[32] last_blocks, stack u64 n
   
   reg u64 i;
   i = 0;
-  while (i<num_last_blocks) {
+  while (i < num_last_blocks) {
     // copy the next block of the message word by word
     reg u64 i2;
     i2 = i;
@@ -373,7 +373,6 @@ inline fn __sha256_ref_alt(reg u64 hash_addr_in mess_addr bytes) {
   hash_addr = hash_addr_st;   // copy the hash address from the stack
   __set_hash(ihv, hash_addr);
 }
-
 
 
 
