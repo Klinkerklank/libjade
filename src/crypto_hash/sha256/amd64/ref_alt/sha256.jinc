@@ -297,7 +297,7 @@ inline fn __f_comp_first(stack u32[8] ihv, reg u64 mess_addr, stack u64 num_firs
     // copy the next block of the message word by word
     reg u64 i2;
     i2 = i;
-    i2 <<= 4;
+    i2 <<= 6;
     inline int j;
     for j=0 to 16 {
       block[j] = (u32)[mess_addr + i2 + 4*j];
