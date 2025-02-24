@@ -16,12 +16,16 @@ int main(void)
 
   // 24 bits / 3 bytes of input message:
   // abc
+  // output should be:
+  // ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad
   uint8_t input[] = {
     0x61, 0x62, 0x63
   };
 
   // 512 bits / 64 bytes / 1 block of input message:
   // abcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcd
+  // output should be:
+  // 625b41490b883891943c5fa54ad45d7c900b9b6e91e159334e320b1f5215a209
   // uint8_t input[] = {
   //   0x61, 0x62, 0x63, 0x64, 0x61, 0x62, 0x63, 0x64,
   //   0x61, 0x62, 0x63, 0x64, 0x61, 0x62, 0x63, 0x64,
@@ -35,6 +39,8 @@ int main(void)
 
   // 1024 bits / 128 bytes / 2 block of input message:
   // abcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcd
+  // output should be:
+  // 4532ef7311099286059abd85d4c06757f96d2448b259f9519222b2ac69b5ebf3
   // uint8_t input[] = {
   //   0x61, 0x62, 0x63, 0x64, 0x61, 0x62, 0x63, 0x64,
   //   0x61, 0x62, 0x63, 0x64, 0x61, 0x62, 0x63, 0x64,
@@ -56,6 +62,8 @@ int main(void)
 
   // 58*U + two blocks of abc =
   // UUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcd
+  // output should be:
+  // f345612c6d5156743e92388fc55a8614572d374c3ee0adc5409e12ebe1741173
   // uint8_t input[] = {
   //   0x55, 0x55, 0x55, 0x55, 0x55, 0x55, 0x55, 0x55, 
   //   0x55, 0x55, 0x55, 0x55, 0x55, 0x55, 0x55, 0x55, 
@@ -85,6 +93,8 @@ int main(void)
 
   // 2048 bits / 256 bytes / 4 block of input message:
   // abcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcd
+  // output should be:
+  // bff3b2e7f0aa7debfa39e4e2cf57caf54c9ed16656e6a968afd28cb9c7cbe0f0
   // uint8_t input[] = {
   //   0x61, 0x62, 0x63, 0x64, 0x61, 0x62, 0x63, 0x64,
   //   0x61, 0x62, 0x63, 0x64, 0x61, 0x62, 0x63, 0x64,
@@ -120,11 +130,14 @@ int main(void)
   //   0x61, 0x62, 0x63, 0x64, 0x61, 0x62, 0x63, 0x64
   // };
 
-  //
   r = jade_hash(hash, input, sizeof(input));
+  
   // 0 bits of input message:
+  // output should be:
+  // e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
   // r = jade_hash(hash, input, 0);
-    assert(r == 0);
+  
+  assert(r == 0);
 
   print_info(JADE_HASH_ALGNAME, JADE_HASH_ARCH, JADE_HASH_IMPL);
   print_str_u8("input", input, sizeof(input));
