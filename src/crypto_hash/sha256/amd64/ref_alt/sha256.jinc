@@ -362,10 +362,13 @@ inline fn __sha256_ref_alt(reg u64 hash_addr_in mess_addr bytes) {
   // run the compression function on the last (two) message block(s) containing padding
   ihv = __f_comp_last(ihv, last_blocks, num_last_blocks);
 
-  // inline int i;
-  // for i=0 to 8 {
-  //   ihv[i] = last_blocks[i+24];
-  // }
+  inline int i;
+  reg u32 swap;
+  for i=0 to 8 {
+    swap = ihv[i];
+    swap = #BSWAP_32(swap);
+    ihv[i] = swap;
+  }
 
   // set the hash value to the IHVs
   reg u64 hash_addr;          // hash address
