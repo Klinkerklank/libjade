@@ -14,79 +14,6 @@ inline fn __init_ihv() -> stack u32[8] {
   return ihv;
 }
 
-// compute how many blocks are filled fully with message bytes,
-// compute whether one or two blocks containing padding are at the end, and
-// compute the last block(s) with padding
-inline fn __f_pad(reg u64 mess bytes) -> stack u64, stack u32[32], reg u64 {
-  stack u32[32] last_blocks; // will hold the actual last block(s) with padding
-  reg u64 num_last_blocks;   // number indicating whether one or two blocks are at the end
-  num_last_blocks = 1;
-
-  // compute the quotient and remainder of (bytes / block size), where block size = 64 bytes
-  reg u64 quot rest;
-  quot   = bytes;
-  quot >>= 6;     // rightshift 6 = quotient of divide by 2^6=64
-  rest   = bytes;
-  rest  &= 0x3F;  // AND with bitmask 0x3F=0b00111111 = remainder of divide by 2^6=64
-
-  // need 8 bytes to encode the length and 1 byte to encode the separator bit
-  // if the remainder of the message exceeds 64 - 8 - 1 = 55 bytes, need an extra block for padding
-  if rest > 55 {
-    num_last_blocks = 2; // need an extra block
-  }
-
-  // copy the bytes of the last block of the message
-  reg u64 mess_i;  // byte index of the last block of the message
-  mess_i   = quot; // set to the number of blocks
-  mess_i <<= 6;    // multiply by 64 bytes per block
-  reg u64 i;
-  i = 0;
-  while (i < rest) {
-    last_blocks[u8 (int) i] = (u8)[mess + mess_i];
-    i += 1;
-    mess_i += 1;
-  }
-
-  // add the single padding bit
-  last_blocks[u8 (int) i] = 0x80; // 0x80 = 0b10000000
-  i += 1;
-
-  // fill with zero-padding: find target index to fill to
-  reg u64 target;
-  if (num_last_blocks == 1) {
-    target = 56;  // 64 - 8 bytes for the length encoding
-  } else {        // two blocks are needed
-    target = 120; // 128 - 8 bytes for the length encoding
-  }
-
-  // fill with zero-padding: actually write zeroes
-  while (i < target) {
-    last_blocks[u8 (int) i] = 0x0;
-    i += 1;
-  }
-
-  // append the message length
-  target >>= 3; // convert to index of 64-bit word
-  bytes <<= 3;  // convert to number of bits
-  bytes = #BSWAP_64(bytes);
-  last_blocks[u64 (int) target] = bytes;
-
-  // swap every word of last_blocks to correct for Little Endianness
-  inline int j;
-  reg u32 swap;
-  for j=0 to 32 {
-    swap = last_blocks[u32 (int) j];
-    swap = #BSWAP_32(swap);
-    last_blocks[u32 (int) j] = swap;
-  }
-
-  stack u64 stack_quot;
-  stack_quot = quot;
-  stack u64 stack_num_last_blocks;
-  stack_num_last_blocks = num_last_blocks;
-  return stack_quot, last_blocks, stack_num_last_blocks;
-}
-
 // sigma_0 fuction for confuscating words for the message schedule
 inline fn __sigma_0(reg u32 w) -> reg u32 {
   // compute the two right rotations and the right shift
@@ -276,67 +203,113 @@ inline fn __f_loop(stack u32[8] ihv, stack u32[64] sch) -> stack u32[8] {
   return ihv; // return the updated IHVs
 }
 
-// process the message blocks that consist entirely of message bytes
-inline fn __f_comp_first(stack u32[8] ihv, reg u64 mess_addr, stack u64 num_first_blocks) -> stack u32[8] {
-  stack u32[16] block; // message block
-  stack u32[64] sch;   // message schedule
-  
-  reg u64 i;
-  i = 0;
-  while (i < num_first_blocks) {
-    // copy the next block of the message word by word
-    reg u64 i2;
-    i2 = i;
-    i2 <<= 6;
-    reg u32 swap;
-    inline int j;
-    for j=0 to 16 {
-      // swap every word to correct for Little Endianness
-      swap = (u32)[mess_addr + i2 + 4*j];
-      swap = #BSWAP_32(swap);
-      block[j] = swap;
-    }
-
-    sch = __f_sch(sch, block); // compute the message schedule
-    ihv = __f_loop(ihv, sch);  // run the main loop and update the IHVs
-
-    i += 1;
+// word-swap every word in the block to correct for Little Endianness
+inline fn __swap_block(stack u32[16] block) -> stack u32[16] {
+  inline int j;
+  reg u32 swap;
+  for j=0 to 16 {
+    swap = block[u32 (int) j];
+    swap = #BSWAP_32(swap);
+    block[u32 (int) j] = swap;
   }
 
-  return ihv;
+  return block;
 }
 
-// process the message blocks that comprise the blocks with padding
-inline fn __f_comp_last(stack u32[8] ihv, stack u32[32] last_blocks, stack u64 num_last_blocks) -> stack u32[8] {
+// construct message blocks and process them
+inline fn __f_comp(stack u32[8] ihv, reg u64 mess_addr nr_raw_bytes) -> stack u32[8] {
   stack u32[16] block; // message block
   stack u32[64] sch;   // message schedule
+  stack u64 bytes_st;
+  bytes_st = nr_raw_bytes; // save the original message length for the length encoding
   
-  reg u64 i;
-  i = 0;
-  while (i < num_last_blocks) {
+  reg u64 byte_index;
+  byte_index = 0;
+  // process all blocks consisting fully of message bytes
+  while (nr_raw_bytes >= 64) {
     // copy the next block of the message word by word
-    reg u64 i2;
-    i2 = i;
-    i2 <<= 4;
     inline int j;
     for j=0 to 16 {
-      block[j] = last_blocks[i2 + j];
+      block[j] = (u32)[mess_addr + byte_index + 4*j];
     }
 
-    sch = __f_sch(sch, block); // compute the message schedule
-    ihv = __f_loop(ihv, sch);  // run the main loop and update the IHVs
+    // process the block
+    block = __swap_block(block); // swap every word to correct for Little Endianness
+    sch = __f_sch(sch, block);   // compute the message schedule
+    ihv = __f_loop(ihv, sch);    // run the main loop and update the IHVs
 
+    // 64 bytes of message have been processed,
+    nr_raw_bytes -= 64; // so decrement the remaining number of bytes to process,
+    byte_index += 64;   // and update the byte index to the next block in memory
+  }
+
+  // all message blocks consisting fully of message bytes have been processed,
+  // now there are < 64 bytes left to process, and the padding has to be done
+
+  // the message bytes and the separator byte are guarnateed to fit in the next block
+  // (<64 + 1 <= 64)
+
+  // copy the remaining message bytes one byte at a time
+  reg u64 i;
+  i = 0;
+  while (i < nr_raw_bytes) {
+    block[u8 (int) i] = (u8)[mess_addr + byte_index];
+    byte_index += 1;
     i += 1;
   }
+
+  // set the separator bit
+  block[u8 (int) i] = 0x80; // 0x80 = 0b10000000
+  i += 1;
+
+  // check if adding padding requires an extra block:
+  // need one byte for the separator bit and need eight bytes for the length encoding
+  // so at most 64-1-8 = 55 bytes left for the message
+  if (nr_raw_bytes > 55) {
+    // the remaining message bytes and padding do not both fit in the current block
+    // so fill the current block to the end with zero-padding
+    while (i < 64) {
+      block[u8 (int) i] = 0x0;
+      i += 1;
+    }
+    i = 0; // reset the index to 0 for the next block
+
+    // process the block
+    block = __swap_block(block); // swap every word to correct for Little Endianness
+    sch = __f_sch(sch, block);   // compute the message schedule
+    ihv = __f_loop(ihv, sch);    // run the main loop and update the IHVs
+  }
+
+  // now guaranteed to be at the last block
+  // fill with zero-padding, leaving space for the length encoding
+  while (i < 56) {
+    block[u8 (int) i] = 0x0;
+    i += 1;
+  }
+
+  // set the length encoding
+  reg u64 bytes;
+  bytes = bytes_st;
+  bytes <<= 3; // convert message length (in bytes) to number of bits
+  bytes = #BSWAP_64(bytes); // account for Little Endianness
+  block[u64 (int) 7] = bytes; // byte index 7*8=56
+
+  // process the block
+  block = __swap_block(block); // swap every word to correct for Little Endianness
+  sch = __f_sch(sch, block);   // compute the message schedule
+  ihv = __f_loop(ihv, sch);    // run the main loop and update the IHVs
 
   return ihv;
 }
 
 // take the IHVs from the stack, and overwrite the hash value
 inline fn __set_hash(stack u32[8] ihv, reg u64 hash) {
+  reg u32 swap;
   inline int i;
   for i=0 to 8 {
-    (u32)[hash + i*4] = ihv[i];
+    swap = ihv[i];
+    swap = #BSWAP_32(swap); // account for Little Endianness in the ihvs
+    (u32)[hash + 4*i] = swap;
   }
 }
 
@@ -346,34 +319,15 @@ inline fn __sha256_ref_alt(reg u64 hash_addr_in mess_addr bytes) {
   stack u64 hash_addr_st; // hash address on the stack
   hash_addr_st = hash_addr_in;
 
-  // compute the message padding
-  stack u64 num_first_blocks; // number indicating the number of blocks fully filled with message bytes
-  stack u64 num_last_blocks;  // number indicating the number of blocks containing padding (1 or 2)
-  stack u32[32] last_blocks;  // space for two blocks of 512 bits, split in 32-bit words
-  num_first_blocks, last_blocks, num_last_blocks = __f_pad(mess_addr, bytes);
-
   // initialise the IHVs on the stack
   stack u32[8] ihv;
   ihv = __init_ihv();
 
-  // run the compression function iteratively on message blocks consisting fully of message bytes
-  ihv = __f_comp_first(ihv, mess_addr, num_first_blocks);
+  // run the compression function, forming (padded) message blocks on the fly
+  ihv = __f_comp(ihv, mess_addr, bytes);
 
-  // run the compression function on the last (two) message block(s) containing padding
-  ihv = __f_comp_last(ihv, last_blocks, num_last_blocks);
-
-  inline int i;
-  reg u32 swap;
-  for i=0 to 8 {
-    swap = ihv[i];
-    swap = #BSWAP_32(swap);
-    ihv[i] = swap;
-  }
-
-  // set the hash value to the IHVs
-  reg u64 hash_addr;          // hash address
-  hash_addr = hash_addr_st;   // copy the hash address from the stack
-  __set_hash(ihv, hash_addr);
+  // store the resulting hash at the given memory address
+  __set_hash(ihv, hash_addr_st);
 }
 
 
